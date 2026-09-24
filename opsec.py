@@ -199,6 +199,43 @@ def read_key():
     return data.decode("utf-8", "ignore") if data else ""
 
 
+def read_line(prompt):
+    sys.stdout.write(prompt)
+    sys.stdout.flush()
+    try:
+        interactive = os.isatty(sys.stdin.fileno())
+    except Exception:
+        interactive = False
+    if not interactive:
+        line = "".join(c for c in sys.stdin.readline().strip() if c.isprintable())
+        sys.stdout.write("\n")
+        sys.stdout.flush()
+        return line[:64]
+    chars = []
+    while True:
+        ch = read_key()
+        if ch == "" or ch in ("\r", "\n"):
+            break
+        if ch in ("\x7f", "\b"):
+            if chars:
+                chars.pop()
+                sys.stdout.write("\b \b")
+                sys.stdout.flush()
+            continue
+        if ch in ("\x00", "\xe0"):
+            read_key()
+            continue
+        if ch == "\x03":
+            cleanup("SIGINT received")
+        if ch.isprintable() and len(chars) < 64:
+            chars.append(ch)
+            sys.stdout.write(ch)
+            sys.stdout.flush()
+    sys.stdout.write("\n")
+    sys.stdout.flush()
+    return "".join(chars).strip()
+
+
 def restore_terminal():
     sys.stdout.write("\033[0m\033[?25h\033[?7h")
     sys.stdout.flush()
@@ -218,6 +255,11 @@ NODE = pick("NULL-NODE", "SHADOW", "ZERO-X", "DARKSTAR", "PHANTOM") + "-" + rand
 EGRESS = rand_ip()
 START_TS = time.time()
 OPS = 0
+TARGET = ""
+
+
+def active_target():
+    return TARGET if TARGET else pick_host()
 
 
 # chrome - faithful port of opsec bash: banner, boot, proxy_chain, hexdump_fake,
@@ -313,7 +355,8 @@ def access_granted():
 
 def target_info(host):
     print(f"{C}[*] Target acquired: {W}{host}{N}")
-    print(f"    {'IP:':<12} {rand_ip()}")
+    ip = host if host.replace(".", "").isdigit() else rand_ip()
+    print(f"    {'IP:':<12} {ip}")
     print(f"    {'OS:':<12} {pick('Linux 6.8', 'Windows Server 2019', 'FreeBSD 14', 'Solaris 11', 'Cisco IOS 15.2')}")
     ports = f"{pick(22, 80, 443, 3306, 8080)}, {pick(21, 25, 3389, 5432, 6379)}, {pick(8443, 9000, 27017, 11211)}"
     print(f"    {'Open ports:':<12} {ports}")
@@ -332,6 +375,7 @@ def op_info():
         ("session:", SESSION),
         ("operator:", user),
         ("node:", NODE),
+        ("target:", TARGET or "(random)"),
         ("uptime:", f"{up}s"),
         ("ops run:", str(OPS)),
         ("egress:", f"{EGRESS} via 6-hop chain"),
@@ -340,6 +384,22 @@ def op_info():
     )
     for label, value in info:
         print(f"    {D}{label:<12}{N} {value}")
+    print()
+
+
+def ask_target():
+    global TARGET
+    print(f"{C}[*] Enter a target for this session {D}(domain, IP or hostname){N}")
+    print(f"{D}    simulation only - nothing is contacted, resolved or scanned{N}")
+    t = read_line(f"    {BG}target ▸ {N}")
+    if t:
+        TARGET = t
+        print(f"{BG}[+] Target locked:{N} {W}{t}{N}")
+    elif TARGET:
+        print(f"{D}[i] Keeping current target: {W}{TARGET}{N}")
+    else:
+        print(f"{D}[i] No target set - random names will be used. Press [t] in the menu to set one.{N}")
+    zz(0.5)
     print()
 
 
@@ -370,7 +430,7 @@ def cleanup(reason="SIGINT received"):
 
 
 def op_firewall():
-    target_info(pick_host())
+    target_info(active_target())
     fw = pick('Palo Alto PA-5450 (stateful)', 'FortiGate 600F', 'Cisco ASA 5525-X',
               'pfSense 2.7 / pf', 'Juniper SRX345')
     print(f"{C}[*] Edge firewall: {W}{fw}{N}")
@@ -396,7 +456,7 @@ def op_firewall():
 
 
 def op_scan():
-    host = f"10.{random.randint(0, 255)}.{random.randint(0, 255)}.{random.randint(1, 254)}"
+    host = TARGET or f"10.{random.randint(0, 255)}.{random.randint(0, 255)}.{random.randint(1, 254)}"
     print(f"{C}[*] Stealth SYN scan vs {W}{host}{N}{C}...{N}")
     zz(0.3)
     print(f"    {D}{'PORT':<12} {'STATE':<10} {'SERVICE':<14} {'BANNER'}{N}")
@@ -425,7 +485,7 @@ def op_crack():
 
 
 def op_privesc():
-    host = pick_host()
+    host = active_target()
     cve = f"CVE-{random.randint(2024, 2027)}-{random.randint(1000, 9999)}"
     print(f"{C}[*] Shell: www-data (uid=33) on {W}{host}{N}")
     zz(0.3)
@@ -458,7 +518,7 @@ def op_sniff():
 
 
 def op_ssh():
-    host = rand_ip()
+    host = TARGET or rand_ip()
     print(f"{C}[*] Credential spray vs ssh://{host}:22 (threads: 64){N}")
     zz(0.3)
     n = random.randint(4, 6)
@@ -473,6 +533,137 @@ def op_ssh():
     print(f"    {W}{pair:<34}{N} {BG}ACCEPTED{N}")
     print(f"{BG}[+] Valid credentials: {user} / {pw}{N}")
     print()
+
+
+def op_dns():
+    dom = TARGET or (pick("necronet", "hypercorp", "darkstar-systems", "nova-bank", "orbital-systems")
+                     + "." + pick("com", "net", "io", "gov"))
+    print(f"{C}[*] DNS reconnaissance vs {W}{dom}{N}")
+    zz(0.3)
+    print(f"{C}[*] Querying nameservers...{N}")
+    print(f"    {D}A     {N} {dom:<34} {W}{rand_ip()}{N}")
+    print(f"    {D}MX    {N} {('mail.' + dom):<34} {W}{rand_ip()}{N}")
+    print(f"    {D}TXT   {N} {('v=spf1 include:_spf.' + dom):<34} {D}...{N}")
+    zz(0.3)
+    print(f"{C}[*] Enumerating subdomains (wordlist: 4,978 entries)...{N}")
+    subs = ["www", "mail", "vpn", "dev", "staging", "admin", "api", "portal",
+            "git", "jenkins", "jira", "db", "backup", "test", "old", "cdn", "files", "monitor"]
+    for s in sorted(random.sample(subs, 10)):
+        print(f"    {G}[+] {s + '.' + dom:<40}{N} {W}{rand_ip()}{N}")
+        zz(0.12)
+    print(f"{BG}[+] 10 subdomains found. Wildcard DNS: off.{N}")
+    print()
+
+
+def op_webscan():
+    host = TARGET or pick_host()
+    pool = (
+        ("CRITICAL", "SQL injection (error-based)", "/product?id=1'"),
+        ("CRITICAL", "Authentication bypass", "/admin/../admin"),
+        ("HIGH", "Reflected XSS", "/search?q=<script>"),
+        ("HIGH", "Local file inclusion", "/download?file=../../etc/passwd"),
+        ("HIGH", "Insecure direct object reference", "/api/v1/users/1337"),
+        ("MEDIUM", "Open redirect", "/login?next=//evil.example"),
+        ("MEDIUM", "Directory listing enabled", "/backup/"),
+        ("MEDIUM", "Missing security headers", "HSTS, CSP, X-Frame-Options"),
+        ("LOW", "Server version disclosure", "nginx/1.18.0"),
+        ("LOW", "Outdated frontend library", "jQuery 1.7.1"),
+    )
+    sev_color = {"CRITICAL": R, "HIGH": Y, "MEDIUM": C, "LOW": D}
+    findings = random.sample(pool, random.randint(5, 8))
+    print(f"{C}[*] Web vulnerability scan vs {W}https://{host}{N}")
+    zz(0.3)
+    progress("Crawling target")
+    print(f"    {D}pages crawled: {random.randint(90, 400)}   forms: {random.randint(3, 14)}   parameters: {random.randint(20, 80)}{N}")
+    progress("Fuzzing parameters")
+    progress("Testing injection points")
+    print()
+    for sev, name, path in findings:
+        print(f"    {sev_color[sev]}[{sev:<8}]{N} {name:<38} {D}{path}{N}")
+        zz(0.15)
+    counts = {}
+    for sev, _, _ in findings:
+        counts[sev] = counts.get(sev, 0) + 1
+    summary = []
+    for sev in ("CRITICAL", "HIGH", "MEDIUM", "LOW"):
+        if sev in counts:
+            summary.append(f"{sev_color[sev]}{counts[sev]} {sev.lower()}{N}")
+    print()
+    print(f"{BG}[+] {len(findings)} findings:{N} {'  '.join(summary)}")
+    print(f"{D}    report: ~/opsec-reports/{host}-{rand_hex(6)}.html (simulated){N}")
+    print()
+
+
+def op_dirbust():
+    host = TARGET or pick_host()
+    wl = pick("common.txt", "raft-medium-directories.txt", "dirb-big.txt")
+    print(f"{C}[*] Directory brute-force vs {W}https://{host}{N}")
+    print(f"    {D}wordlist: {wl} ({random.randint(4000, 22000)} entries){N}")
+    zz(0.3)
+    pool = (
+        ("/admin", "301", "-> /admin/"),
+        ("/backup.zip", "200", f"{random.randint(2, 900)} MB"),
+        ("/.git/HEAD", "200", "ref: refs/heads/main"),
+        ("/api/v1/", "401", "auth required"),
+        ("/config.php.bak", "200", "2.1 KB"),
+        ("/uploads/", "403", "forbidden"),
+        ("/phpmyadmin/", "200", "v4.9.5"),
+        ("/server-status", "403", "forbidden"),
+        ("/wp-login.php", "200", "WordPress"),
+        ("/.env", "200", "1.2 KB"),
+    )
+    found = random.sample(pool, random.randint(4, 7))
+    for path, code, note in found:
+        col = BG if code == "200" else (Y if code == "301" else D)
+        print(f"    {col}[{code}]{N} {path:<22} {D}{note}{N}")
+        zz(0.2)
+    print(f"{BG}[+] {len(found)} paths discovered.{N}")
+    print()
+
+
+def op_vulnscan():
+    host = TARGET or pick_host()
+    services = (
+        ("22/tcp", "OpenSSH 7.4", "CRITICAL"),
+        ("80/tcp", "nginx 1.18.0", "MEDIUM"),
+        ("443/tcp", "OpenSSL 1.1.1", "HIGH"),
+        ("3306/tcp", "MySQL 5.7.31", "HIGH"),
+        ("8080/tcp", "Apache Tomcat 9.0.30", "CRITICAL"),
+    )
+    sev_color = {"CRITICAL": R, "HIGH": Y, "MEDIUM": C, "LOW": D}
+    print(f"{C}[*] Vulnerability scan vs {W}{host}{N}")
+    zz(0.3)
+    hits = random.sample(services, random.randint(3, 5))
+    for port, svc, sev in hits:
+        cve = f"CVE-{random.randint(2018, 2027)}-{random.randint(1000, 29999)}"
+        print(f"    {W}{port:<9}{N} {svc:<20} {sev_color[sev]}{sev:<8}{N} {cve}")
+        zz(0.2)
+    print(f"{BG}[+] {len(hits)} vulnerable services matched. Exploit modules available: {len(hits)}{N}")
+    print(f"{D}    hint: press [e] to run the full exploit chain{N}")
+    print()
+
+
+def op_exploitchain():
+    host = TARGET or pick_host()
+    cve = f"CVE-{random.randint(2020, 2027)}-{random.randint(1000, 29999)}"
+    stages = (
+        ("recon", "services fingerprinted, 3 entry points"),
+        ("weaponize", cve + " module compiled"),
+        ("initial access", "reverse shell to " + rand_ip() + ":443"),
+        ("privilege escalation", "uid=0(root) / nt authority\\system"),
+        ("persistence", "systemd unit + cron + SSH key"),
+        ("lateral movement", str(random.randint(2, 6)) + " internal hosts pivoted"),
+        ("objective", "domain admin - crown jewels staged"),
+    )
+    print(f"{C}[*] Building exploit chain vs {W}{host}{N}")
+    zz(0.3)
+    for i, (stage, detail) in enumerate(stages, 1):
+        print(f"    {D}stage {i}{N}  {stage:<22} {W}{detail}{N}")
+        zz(0.25)
+    print()
+    print(f"{BG}[+] Chain complete: initial access -> root -> domain admin{N}")
+    access_granted()
+    zz(0.8)
 
 
 # --- ops set B + menu (ported from bash opsec) ---
@@ -529,7 +720,7 @@ def op_backdoor():
 
 
 def op_auto():
-    keys = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "s", "b"]
+    keys = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "s", "b", "n", "w", "d", "v", "e"]
     n = random.randint(3, 5)
     type_out(f"{C}> AUTO-OP engaged - {n} operations queued{N}")
     zz(0.3)
@@ -563,6 +754,16 @@ def run_op(key):
         op_ssh()
     elif key == "b":
         op_backdoor()
+    elif key == "n":
+        op_dns()
+    elif key == "w":
+        op_webscan()
+    elif key == "d":
+        op_dirbust()
+    elif key == "v":
+        op_vulnscan()
+    elif key == "e":
+        op_exploitchain()
     elif key == "m":
         matrix(6)
     elif key == "i":
@@ -577,17 +778,22 @@ def paint_menu():
     print(f"    {C}══ OPERATIONS {'═' * 42}{N}")
     print()
     rows = [
-        ("1", "firewall-bypass", "8", "identity-spoof"),
-        ("2", "port-scan", "9", "packet-sniff"),
-        ("3", "credential-crack", "s", "ssh-bruteforce"),
-        ("4", "privilege-escalate", "b", "deploy-backdoor"),
-        ("5", "data-exfil", "m", "matrix-rain"),
-        ("6", "memory-dump", "i", "session-info"),
-        ("7", "proxy-chain", "a", "auto-run"),
+        ("1", "firewall-bypass", "8", "identity-spoof", "n", "dns-recon"),
+        ("2", "port-scan", "9", "packet-sniff", "w", "web-vuln-scan"),
+        ("3", "credential-crack", "s", "ssh-bruteforce", "d", "dir-bruteforce"),
+        ("4", "privilege-escalate", "b", "deploy-backdoor", "v", "vuln-scan"),
+        ("5", "data-exfil", "m", "matrix-rain", "e", "exploit-chain"),
+        ("6", "memory-dump", "i", "session-info", "t", "set-target"),
+        ("7", "proxy-chain", "a", "auto-run", "", ""),
     ]
-    for k1, n1, k2, n2 in rows:
-        print(f"      {BG}[{k1}]{N} {n1:<20} {BG}[{k2}]{N} {n2}")
+    for k1, n1, k2, n2, k3, n3 in rows:
+        line = f"      {BG}[{k1}]{N} {n1:<20} {BG}[{k2}]{N} {n2:<20}"
+        if k3:
+            line += f" {BG}[{k3}]{N} {n3}"
+        print(line)
     print(f"      {BG}[q]{N} {'quit':<20}")
+    print()
+    print(f"    {D}target:{N} {W}{TARGET or '(random per op)'}{N} {D}- press [t] to change{N}")
     print()
     sys.stdout.write(f"    {BG}op ▸ {N}")
     sys.stdout.flush()
@@ -603,7 +809,10 @@ def menu():
         if k in ("q", "Q"):
             cleanup("User logout")
         low = k.lower()
-        if low in "123456789sbmia":
+        if low == "t":
+            ask_target()
+            continue
+        if low in "123456789sbmianwdve":
             run_op(low)
         else:
             continue
@@ -622,6 +831,7 @@ def main():
     proxy_chain()
     zz(0.4)
     matrix(2)
+    ask_target()
     menu()
 
 
