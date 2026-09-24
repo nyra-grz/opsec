@@ -1,9 +1,8 @@
 #!/bin/bash
 # Headless end-to-end smoke test for opsec.py.
 #
-# opsec.py is validated after it is assembled, so it may not exist yet while
-# this file is being written. When it does exist, this script pipes the full
-# menu key sequence into it and checks for a handful of markers.
+# It types a target at the startup prompt, then pipes the full menu key
+# sequence into it and checks for a handful of markers.
 #
 # No root needed: OPSEC_ALLOW_NONROOT=1 skips the root check, and because stdin
 # is not a tty, opsec.py reads single keypresses straight from the pipe.
@@ -25,9 +24,10 @@ check() {
   fi
 }
 
-# Single spaces between the keys satisfy the "press any key" prompts.
+# First line answers the target prompt; single spaces between the menu keys
+# satisfy the "press any key" prompts.
 rc=0
-printf '%s\n' '1 2 3 4 5 6 7 8 9 s b i q' \
+printf '%s\n' 'demo.example' '1 2 3 4 5 6 7 8 9 s b n w d v e m i q' \
   | OPSEC_ALLOW_NONROOT=1 python3 opsec.py --fast >"$tmp" 2>&1 || rc=$?
 
 if [ "$rc" -eq 0 ]; then
@@ -37,9 +37,13 @@ else
   fail=1
 fi
 
+check "Target locked"
 check "Firewall evaded"
 check "ACCESS  GRANTED"
 check "Implant live"
+check "subdomains found"
+check "paths discovered"
+check "Chain complete"
 check "You were never here"
 
 exit "$fail"

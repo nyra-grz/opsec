@@ -1,10 +1,10 @@
 # opsec
 
-A fake "hacker mode" for your terminal. You type `sudo opsec` and the screen goes full Hollywood: a ghost-shell boot sequence, a port scan, brute-force hash cracking, `ACCESS GRANTED`, data exfiltration and Matrix rain across the whole window. It's **menu-driven**, so you pick the operations yourself — or hit `a` and let it auto-run the whole show. Press **Ctrl+C** and it "wipes the logs" before it exits.
+A fake "hacker mode" for your terminal. You type `sudo opsec` and the screen goes full Hollywood: a ghost-shell boot sequence, a port scan, brute-force hash cracking, `ACCESS GRANTED`, data exfiltration and Matrix rain across the whole window. It's **menu-driven**, so you pick the operations yourself — DNS recon, web-vuln scan, directory brute-force, CVE matching, a full exploit chain — or hit `a` and let it auto-run the whole show. You can enter a target (domain, IP or hostname) and the whole show plays against it. Press **Ctrl+C** and it "wipes the logs" before it exits.
 
 It's a single Python file with zero dependencies, and it runs on macOS, Linux and Windows. The IPs, hashes and file names are random.
 
-> **It's all fake.** Nothing on your system is touched, scanned or sent anywhere. There is no network activity, no port scanning, and no files are read or written. The IPs, hashes and file names are just random strings.
+> **It's all fake.** Nothing on your system is touched, scanned or sent anywhere. There is no network activity, no port scanning, and no files are read or written. The IPs, hashes, file names and the target you type are only displayed as random-looking text.
 
 ## Install
 
@@ -71,9 +71,15 @@ Type a key and it plays the corresponding operation (then you're back at the men
 | `9` | packet-sniff |
 | `s` | ssh-bruteforce |
 | `b` | deploy-backdoor |
+| `n` | dns-recon |
+| `w` | web-vuln-scan |
+| `d` | dir-bruteforce |
+| `v` | vuln-scan (CVE matching) |
+| `e` | exploit-chain |
 | `m` | matrix-rain |
 | `i` | session-info |
 | `a` | auto-run (plays the whole sequence) |
+| `t` | set-target (change the session target) |
 | `q` | quit |
 
 ## Options
